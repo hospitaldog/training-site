@@ -23,93 +23,113 @@
 
   <div id="content">Loading…</div>
 
-  <script>
-    // 🔧 EDIT THESE TWO LINES:
-    const GH_USER = "hospitaldog";
-    const GH_REPO = "training-site"; // your repo name
+<script>
+  // ✅ Your repo info
+  const GH_USER = "hospitaldog";
+  const GH_REPO = "training-site";
+  const BRANCH  = "main";              // change if your default branch is not 'main'
+  const SUBFOLDERS = [];               // e.g., ["ArcMap", "Fittings"]
 
-    // If you put files in subfolders, list them here to fetch as well:
-    const SUBFOLDERS = []; // e.g., ["ArcMap", "Fittings"]
+  function apiUrl(path="") {
+    const clean = path ? `/${path.replace(/^\/+/,"")}` : "";
+    return `https://api.github.com/repos/${GH_USER}/${GH_REPO}/contents${clean}?ref=${BRANCH}`;
+  }
 
-    async function fetchDir(path="") {
-      const url = `https://api.github.com/repos/${GH_USER}/${GH_REPO}/contents/${path}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error("GitHub API error");
-      return res.json();
+  async function fetchDir(path="") {
+    const url = apiUrl(path);
+    const res = await fetch(url, { headers: { "Accept": "application/vnd.github.v3+json" }});
+    if (!res.ok) {
+      const text = await res.text().catch(()=> "");
+      throw new Error(`GitHub API error ${res.status} ${res.statusText} at ${url}\n${text}`);
+    }
+    return res.json();
+  }
+
+  function humanName(filename) {
+    return filename.replace(/[-_]+/g, " ").replace(/\.[^.]+$/,"");
+  }
+
+  function linkFor(path) {
+    // Link to the GitHub Pages URL for the raw file
+    return `https://${GH_USER}.github.io/${GH_REPO}/${path}`;
+  }
+
+  function render(files) {
+    const content = document.getElementById("content");
+    const byExt = {};
+    files.forEach(f => {
+      if (f.type !== "file") return;
+      if (f.name.toLowerCase() === "index.html") return;
+      const ext = (f.name.split(".").pop() || "").toLowerCase();
+      (byExt[ext] ||= []).push(f);
+    });
+
+    content.innerHTML = "";
+    const exts = Object.keys(byExt).sort();
+    if (exts.length === 0) {
+      content.textContent = "No files found in this repository.";
+      return;
     }
 
-    function humanName(filename) {
-      return filename.replace(/[-_]+/g, " ").replace(/\.[^.]+$/,"");
-    }
+    exts.forEach(ext => {
+      const group = document.createElement("div");
+      group.className = "group";
+      const h2 = document.createElement("h2");
+      h2.textContent = ext ? ext.toUpperCase() : "FILES";
+      group.appendChild(h2);
 
-    function linkFor(path) {
-      return `https://${GH_USER}.github.io/${GH_REPO}/${path}`;
-    }
-
-    function render(files) {
-      const content = document.getElementById("content");
-      const byExt = {};
-      files.forEach(f => {
-        if (f.type !== "file") return;
-        if (f.name.toLowerCase() === "index.html") return;
-        const ext = (f.name.split(".").pop() || "").toLowerCase();
-        if (!byExt[ext]) byExt[ext] = [];
-        byExt[ext].push(f);
+      byExt[ext].sort((a,b)=>a.name.localeCompare(b.name)).forEach(f=>{
+        const p = document.createElement("p");
+        p.className = "file";
+        p.dataset.filename = f.name.toLowerCase();
+        const a = document.createElement("a");
+        a.href = linkFor(f.path);
+        a.textContent = humanName(f.name);
+        a.target = "_blank";
+        const tag = document.createElement("span");
+        tag.className = "ext";
+        tag.style.display = "inline-block";
+        tag.style.minWidth = "64px";
+        tag.style.color = "#888";
+        tag.style.fontSize = "12px";
+        tag.style.textTransform = "uppercase";
+        tag.textContent = ext;
+        p.appendChild(tag);
+        p.appendChild(a);
+        group.appendChild(p);
       });
+      content.appendChild(group);
+    });
 
-      const extsOrder = Object.keys(byExt).sort((a,b)=>a.localeCompare(b));
-      content.innerHTML = "";
-      extsOrder.forEach(ext => {
-        const group = document.createElement("div");
-        group.className = "group";
-        const h2 = document.createElement("h2");
-        h2.textContent = ext ? ext.toUpperCase() : "FILES";
-        group.appendChild(h2);
-
-        byExt[ext].sort((a,b)=>a.name.localeCompare(b.name)).forEach(f=>{
-          const p = document.createElement("p");
-          p.className = "file";
-          p.dataset.filename = f.name.toLowerCase();
-          const a = document.createElement("a");
-          a.href = linkFor(f.path);
-          a.textContent = humanName(f.name);
-          a.target = "_blank";
-          const tag = document.createElement("span");
-          tag.className = "ext";
-          tag.textContent = ext;
-          p.appendChild(tag);
-          p.appendChild(a);
-          group.appendChild(p);
-        });
-        content.appendChild(group);
+    // simple search
+    const search = document.getElementById("search");
+    search.addEventListener("input", () => {
+      const q = search.value.trim().toLowerCase();
+      document.querySelectorAll(".file").forEach(el=>{
+        el.style.display = q && !el.dataset.filename.includes(q) ? "none" : "";
       });
+    });
+  }
 
-      // Simple client-side search
-      const search = document.getElementById("search");
-      search.addEventListener("input", () => {
-        const q = search.value.trim().toLowerCase();
-        document.querySelectorAll(".file").forEach(el=>{
-          el.classList.toggle("hidden", q && !el.dataset.filename.includes(q));
-        });
-      });
-    }
-
-    (async function init(){
-      try {
-        const root = await fetchDir("");
-        const all = [...root];
-        for (const sub of SUBFOLDERS) {
-          const kids = await fetchDir(sub);
-          kids.forEach(k => k.path = `${sub}/${k.name}`);
-          all.push(...kids);
-        }
-        render(all);
-      } catch (e) {
-        document.getElementById("content").textContent = "Failed to load file list. Check GH_USER/GH_REPO.";
-        console.error(e);
+  (async function init(){
+    const content = document.getElementById("content");
+    try {
+      const root = await fetchDir("");
+      const all = [...root];
+      for (const sub of SUBFOLDERS) {
+        const kids = await fetchDir(sub);
+        kids.forEach(k => k.path = `${sub}/${k.name}`);
+        all.push(...kids);
       }
-    })();
-  </script>
+      render(all);
+    } catch (e) {
+      console.error(e);
+      content.textContent = "Failed to load file list:\n" + e.message;
+    }
+  })();
+</script>
+  
 </body>
 </html>
+
 
